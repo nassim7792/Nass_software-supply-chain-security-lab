@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% set active = 'tl' %}
+{% block body %}
+<div class="card">
+  <strong>Attack timeline</strong>
+  <div class="muted" style="font-size:13px">
+    Chronological sequence from dependency resolution to code execution.
+  </div>
+</div>
+
+{% if not rows %}
+  <div class="card muted">Nothing yet. Run <code>python -m scsim.runner attack</code>.</div>
+{% else %}
+<div class="card">
+  <div class="tl">
+    {% for r in rows %}
+    <div class="node">
+      <div class="when">{{ r.received_at }}</div>
+      <div>
+        <span class="stage {{ r.stage or 'unknown' }}">{{ r.stage or 'unknown' }}</span>
+        &nbsp;code ran on <strong>{{ r.hostname }}</strong> as <strong>{{ r.username }}</strong>
+      </div>
+      <div class="muted" style="font-size:13px">
+        {{ r.package }} {{ r.package_version }} · python {{ r.python_version }} · cwd <code>{{ r.cwd }}</code>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="muted" style="font-size:13px;margin-top:8px">
+    build = pip/uv executed the package's build backend ·
+    post-install = the setup.py install hook ran ·
+    import = the app imported the module at runtime
+  </div>
+</div>
+{% endif %}
+{% endblock %}

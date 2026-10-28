@@ -1,0 +1,16 @@
+{
+  "_comment": "Known-good lockfile pinning the LEGITIMATE internal versions and their artifact hashes. The impostor internal-auth-utils 99.0.0 matches neither the pinned version (1.4.2) nor the pinned hash, so a hash-verified install refuses it.",
+  "generated_by": "scsim defenses.lockfile_pinning",
+  "packages": {
+    "internal-auth-utils": {
+      "version": "1.4.2",
+      "sha256": "a3f1c9e2b7d04e5f6a8b9c0d1e2f3a4b5c6d7e8f901a2b3c4d5e6f708192a3b4c",
+      "index": "https://pypi.internal.acme.example/simple/"
+    },
+    "fastapi": {
+      "version": "0.110.0",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "index": "https://pypi.org/simple/"
+    }
+  }
+}

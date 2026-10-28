@@ -1,0 +1,133 @@
+# =============================================================================
+# GitLab CI/CD — Software Supply Chain Security pipeline
+#
+# The pipeline enforces security as a gate on delivery:
+#
+#   build → test → sbom → cve_scan → policy → security_gate → deploy
+#
+# If any security stage fails, `security_gate` fails, and `deploy` never runs.
+# That is the whole point: a release cannot ship while a control is red.
+# =============================================================================
+stages:
+  - build
+  - test
+  - sbom
+  - scan
+  - policy
+  - gate
+  - deploy
+
+default:
+  image: python:3.12-slim
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/pip
+  before_script:
+    - python -V
+    - pip install --cache-dir .cache/pip -r requirements.txt
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+# --- build -------------------------------------------------------------------
+build:
+  stage: build
+  script:
+    - pip install --cache-dir .cache/pip build
+    - python -m build --sdist packages/internal-auth-utils
+  artifacts:
+    paths:
+      - packages/internal-auth-utils/dist/
+    expire_in: 1 day
+
+# --- tests -------------------------------------------------------------------
+test:
+  stage: test
+  script:
+    - pip install --cache-dir .cache/pip pytest
+    - pytest -q --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+    paths:
+      - report.xml
+    expire_in: 1 week
+
+# --- SBOM (CycloneDX) --------------------------------------------------------
+sbom:
+  stage: sbom
+  script:
+    - python -m security.sbom -o security/sbom.cyclonedx.json
+    - echo "SBOM generated:" && head -c 400 security/sbom.cyclonedx.json
+  artifacts:
+    paths:
+      - security/sbom.cyclonedx.json
+    expire_in: 1 week
+
+# --- CVE scan (OSV; Trivy optional) ------------------------------------------
+cve_scan:
+  stage: scan
+  needs: ["sbom"]
+  script:
+    - python -m security.cve_scan --sbom security/sbom.cyclonedx.json -o security/cve_report.json
+  artifacts:
+    paths:
+      - security/cve_report.json
+    expire_in: 1 week
+  # The scan itself must not fail the pipeline; the GATE decides. The scan only
+  # produces evidence.
+  allow_failure: true
+
+# Optional: a dedicated Trivy job (uses the official image) scanning the SBOM.
+trivy_scan:
+  stage: scan
+  needs: ["sbom"]
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  before_script: []
+  script:
+    - trivy sbom security/sbom.cyclonedx.json --severity HIGH,CRITICAL --exit-code 0 --format table
+  allow_failure: true
+
+# --- dependency-confusion policy scan ----------------------------------------
+policy:
+  stage: policy
+  needs: ["build"]
+  script:
+    # Non-zero exit if any internal name can resolve from a public index.
+    - python -m defenses.policy_scanner target-app/pyproject.toml
+  # Surfaced as its own red job; the gate also enforces it.
+  allow_failure: true
+
+# --- the security gate: THIS blocks delivery ---------------------------------
+# On this LAB repo the target-app is intentionally vulnerable, so the gate is
+# EXPECTED to block. The job passes when the gate correctly blocks delivery
+# (that is the demonstration). In a real project you would drop the wrapper and
+# let a non-zero gate fail the pipeline, stopping the deploy stage below.
+security_gate:
+  stage: gate
+  needs: ["sbom", "cve_scan"]
+  script:
+    - |
+      if python -m security.gate \
+           --policy security/security-policy.yml \
+           --sbom security/sbom.cyclonedx.json \
+           --cve security/cve_report.json; then
+        echo "Gate did NOT block an intentionally-vulnerable app"; exit 1
+      else
+        echo "Gate correctly blocked delivery (lab demonstration)."
+      fi
+
+# --- deploy: only reachable when the gate is green ---------------------------
+deploy:
+  stage: deploy
+  needs: ["security_gate"]
+  script:
+    - echo "All security controls passed — proceeding with delivery."
+    # ... real deploy steps would go here ...
+  when: manual          # require a human to click, after a green gate
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'

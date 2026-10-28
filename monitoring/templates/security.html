@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% set active = 'sec' %}
+{% block body %}
+
+{% if verdict %}
+  {% if verdict.passed %}
+    <div class="gatebanner ok">✅ SECURITY GATE: DELIVERY ALLOWED</div>
+  {% else %}
+    <div class="gatebanner block">⛔ SECURITY GATE: DELIVERY BLOCKED</div>
+  {% endif %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <strong>Gate rules</strong>
+      <label class="muted" style="font-size:13px;cursor:pointer">
+        <input type="checkbox" id="autoRefresh"> auto-refresh (5s)
+      </label>
+    </div>
+    {% for r in verdict.results %}
+    <div class="rule {{ 'pass' if r.passed else 'fail' }}">
+      <div class="badge">{{ 'PASS' if r.passed else 'FAIL' }}</div>
+      <div>
+        <div><strong>{{ r.check }}</strong> — {{ r.detail }}</div>
+        {% for ev in r.get('evidence', [])[:6] %}<div class="muted" style="font-size:13px">• {{ ev }}</div>{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card muted">
+    No gate verdict yet. Generate the artifacts first:
+    <code>python -m security.sbom</code> ·
+    <code>python -m security.cve_scan --demo</code>, then refresh.
+  </div>
+{% endif %}
+
+{% if cve %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+    <div style="flex:1;min-width:260px">
+      <strong>Vulnerabilities (CVE)</strong>
+      <div class="counts" style="margin:8px 0">
+        <span class="sev CRITICAL">CRITICAL {{ cve.counts_by_severity.get('CRITICAL', 0) }}</span>
+        <span class="sev HIGH">HIGH {{ cve.counts_by_severity.get('HIGH', 0) }}</span>
+        <span class="sev MEDIUM">MEDIUM {{ cve.counts_by_severity.get('MEDIUM', 0) }}</span>
+        <span class="sev LOW">LOW {{ cve.counts_by_severity.get('LOW', 0) }}</span>
+        <span class="sev UNKNOWN">UNKNOWN {{ cve.counts_by_severity.get('UNKNOWN', 0) }}</span>
+      </div>
+
+      <div id="filterChips" style="margin:10px 0">
+        <button class="chipbtn active" data-sev="ALL">All</button>
+        <button class="chipbtn" data-sev="CRITICAL">Critical</button>
+        <button class="chipbtn" data-sev="HIGH">High</button>
+        <button class="chipbtn" data-sev="MEDIUM">Medium</button>
+        <button class="chipbtn" data-sev="LOW">Low</button>
+        <button class="chipbtn" data-sev="UNKNOWN">Unknown</button>
+      </div>
+      <input id="cveSearch" type="search" placeholder="Filter by package or CVE id…"
+             style="width:100%;max-width:360px;background:#0c0f1c;border:1px solid var(--line);
+                    color:var(--ink);border-radius:8px;padding:7px 10px;margin-bottom:8px">
+    </div>
+    <div style="width:220px;height:220px">
+      <canvas id="sevChart" width="220" height="220"></canvas>
+    </div>
+  </div>
+
+  <table id="cveTable">
+    <thead><tr>
+      <th data-key="sev" style="cursor:pointer">Severity ▾</th>
+      <th data-key="pkg" style="cursor:pointer">Package</th>
+      <th data-key="cve" style="cursor:pointer">CVE</th>
+      <th>Fixed in</th>
+    </tr></thead>
+    <tbody>
+    {% for f in cve.findings %}
+      <tr data-sev="{{ f.severity }}" data-pkg="{{ f.package }}" data-cve="{{ f.id }}"
+          data-rank="{{ {'CRITICAL':4,'HIGH':3,'MEDIUM':2,'LOW':1,'UNKNOWN':0}.get(f.severity, 0) }}">
+        <td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
+        <td>{{ f.package }} {{ f.version }}</td>
+        <td>{{ f.id }}</td>
+        <td class="muted">{{ f.fixed_versions | join(', ') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div id="noMatch" class="muted" style="display:none;padding:10px">No matching vulnerabilities.</div>
+  {% if not cve.findings %}<div class="muted">No known vulnerabilities in the scanned components.</div>{% endif %}
+</div>
+{% endif %}
+
+{% if sbom %}
+<div class="card">
+  <strong>SBOM</strong> <span class="muted">(CycloneDX {{ sbom.specVersion }} · {{ sbom.components | length }} components)</span>
+  <table style="margin-top:8px">
+    <thead><tr><th>Component</th><th>Version</th><th>purl</th><th></th></tr></thead>
+    <tbody>
+    {% for c in sbom.components %}
+      <tr>
+        <td>{{ c.name }}</td>
+        <td>{{ c.version }}</td>
+        <td class="muted"><code>{{ c.purl }}</code></td>
+        <td>{% if c.properties %}<span class="sev HIGH">internal</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card muted" style="font-size:13px">
+  Attack side: see the <a href="/" style="color:#7fd4ff">attack monitor</a> and
+  <a href="/timeline" style="color:#7fd4ff">timeline</a> for the dependency-confusion beacons.
+</div>
+
+{% if cve %}
+<script id="sevCounts" type="application/json">{{ cve.counts_by_severity | tojson }}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function () {
+  // ---- severity donut (enhancement; degrades gracefully if CDN blocked) ----
+  try {
+    var counts = JSON.parse(document.getElementById('sevCounts').textContent);
+    var order = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+    var colors = {CRITICAL:'#ff6b6b',HIGH:'#ff9f45',MEDIUM:'#f6d667',LOW:'#79e6b0',UNKNOWN:'#9aa0b8'};
+    if (window.Chart) {
+      new Chart(document.getElementById('sevChart'), {
+        type: 'doughnut',
+        data: {
+          labels: order,
+          datasets: [{ data: order.map(function(s){return counts[s]||0;}),
+                       backgroundColor: order.map(function(s){return colors[s];}),
+                       borderColor: '#171b2e', borderWidth: 2 }]
+        },
+        options: { plugins: { legend: { labels: { color: '#9aa0b8', boxWidth: 12 } } },
+                   cutout: '62%' }
+      });
+    }
+  } catch (e) {}
+
+  // ---- filter chips + search ----
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#cveTable tbody tr'));
+  var activeSev = 'ALL';
+  var search = document.getElementById('cveSearch');
+  function apply() {
+    var q = (search.value || '').toLowerCase();
+    var shown = 0;
+    rows.forEach(function (r) {
+      var okSev = activeSev === 'ALL' || r.dataset.sev === activeSev;
+      var hay = (r.dataset.pkg + ' ' + r.dataset.cve).toLowerCase();
+      var okQ = !q || hay.indexOf(q) !== -1;
+      var show = okSev && okQ;
+      r.style.display = show ? '' : 'none';
+      if (show) shown++;
+    });
+    document.getElementById('noMatch').style.display = shown ? 'none' : '';
+  }
+  document.querySelectorAll('#filterChips .chipbtn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('#filterChips .chipbtn').forEach(function (x){x.classList.remove('active');});
+      b.classList.add('active');
+      activeSev = b.dataset.sev;
+      apply();
+    });
+  });
+  if (search) search.addEventListener('input', apply);
+
+  // ---- column sort ----
+  var tbody = document.querySelector('#cveTable tbody');
+  var dir = {};
+  document.querySelectorAll('#cveTable th[data-key]').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var key = th.dataset.key;
+      dir[key] = !dir[key];
+      var mult = dir[key] ? 1 : -1;
+      rows.sort(function (a, b) {
+        var va, vb;
+        if (key === 'sev') { va = +a.dataset.rank; vb = +b.dataset.rank; }
+        else if (key === 'pkg') { va = a.dataset.pkg; vb = b.dataset.pkg; }
+        else { va = a.dataset.cve; vb = b.dataset.cve; }
+        return va < vb ? -mult : va > vb ? mult : 0;
+      });
+      rows.forEach(function (r) { tbody.appendChild(r); });
+    });
+  });
+
+  // ---- auto-refresh ----
+  var cb = document.getElementById('autoRefresh');
+  var KEY = 'scsim_autorefresh';
+  try { if (localStorage.getItem(KEY) === '1' && cb) cb.checked = true; } catch (e) {}
+  var timer = null;
+  function sync() {
+    if (cb && cb.checked) { timer = setTimeout(function(){ location.reload(); }, 5000); }
+    else if (timer) { clearTimeout(timer); timer = null; }
+  }
+  if (cb) {
+    cb.addEventListener('change', function () {
+      try { localStorage.setItem(KEY, cb.checked ? '1' : '0'); } catch (e) {}
+      sync();
+    });
+    sync();
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

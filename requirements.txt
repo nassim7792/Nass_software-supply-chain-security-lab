@@ -1,0 +1,29 @@
+# Core demo + apps
+fastapi>=0.110
+uvicorn[standard]>=0.29
+jinja2>=3.1
+httpx>=0.27
+requests>=2.31
+
+# Local private registry
+pypiserver>=2.0
+passlib>=1.7          # pypiserver auth helper (optional)
+
+# Packaging / build
+build>=1.2
+twine>=5.0            # used only to upload to the LOCAL registry
+packaging>=24.0
+
+# Detection
+scapy>=2.5            # network monitor (needs raw-socket privileges)
+watchdog>=4.0         # filesystem monitor
+
+# CLI
+rich>=13.7            # pretty narrated output
+
+# DevSecOps layer
+pyyaml>=6.0           # security gate policy parsing
+pytest>=8.0           # automated test suite
+cyclonedx-bom>=5.0    # real `cyclonedx-py` SBOM (transitive deps) for `sbom --real`
+# Optional production tooling:
+#   (Trivy is a standalone binary, install from https://aquasecurity.github.io/trivy)

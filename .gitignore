@@ -1,0 +1,14 @@
+# Runtime state and generated artifacts
+.scsim_state/
+packages/*/dist/
+packages/*/*.egg-info/
+**/__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# Generated security artifacts (produced by the pipeline)
+security/sbom.cyclonedx.json
+security/cve_report.json
+security/cve_report.demo.json
+requirements.lock.txt
+report.xml

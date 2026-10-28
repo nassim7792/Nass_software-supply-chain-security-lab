@@ -1,0 +1,37 @@
+# =============================================================================
+# Security policy for the CI security gate (security/gate.py).
+# Edit these rules to tighten or relax what blocks a delivery. The gate reads
+# the SBOM + CVE report + repo config and fails the pipeline when a rule trips.
+# =============================================================================
+version: 1
+
+rules:
+  # An SBOM must exist and be a valid CycloneDX document.
+  require_sbom: true
+
+  # Dependency-confusion posture (reuses defenses/policy_scanner.py).
+  dependency_confusion:
+    # Fail if an internal-looking package can resolve from a public index,
+    # or if an unsafe index strategy is configured.
+    fail_on_unscoped_internal: true
+    # pyproject files to audit (relative to repo root).
+    audit_paths:
+      - target-app/pyproject.toml
+
+  # Known-vulnerability policy (from the OSV/Trivy CVE report).
+  cve:
+    # Block delivery if any non-allowlisted finding is at or above this level.
+    # One of: LOW, MEDIUM, HIGH, CRITICAL.
+    fail_on_severity: HIGH
+    # Hard caps per severity for non-allowlisted findings (optional).
+    per_severity_max:
+      CRITICAL: 0
+      HIGH: 0
+      MEDIUM: 10
+    # OSV/CVE ids to ignore, each with a documented justification. Example:
+    #   - id: CVE-2024-99999
+    #     reason: "not reachable in our usage; tracked in TICKET-123"
+    allowlist: []
+    # Treat lookup errors (e.g. scanner offline) as a failure, so a broken
+    # scan can't silently let a release through.
+    fail_on_scan_errors: false

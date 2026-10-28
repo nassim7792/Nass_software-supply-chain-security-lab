@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set active = 'dash' %}
+{% block body %}
+<div class="card" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+  <div>
+    <div class="count">{{ count }}</div>
+    <div class="muted">beacons captured</div>
+  </div>
+  <div class="muted" style="flex:1;min-width:220px">
+    Each beacon is a moment the impostor package ran code on a host. Watch the
+    <a href="/timeline" style="color:#7fd4ff">timeline</a> to see build →
+    install → import for a single dependency line.
+  </div>
+  <form method="post" action="/api/clear" onsubmit="setTimeout(()=>location.reload(),150)">
+    <button type="submit">Clear captures</button>
+  </form>
+</div>
+
+{% if not rows %}
+  <div class="card muted">No beacons yet. Start the attack:
+    <code>python -m scsim.runner attack</code></div>
+{% endif %}
+
+{% for r in rows %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <span class="stage {{ r.stage or 'unknown' }}">{{ r.stage or 'unknown' }}</span>
+      <strong>&nbsp;{{ r.package }}</strong>
+      <code>{{ r.package_version }}</code>
+    </div>
+    <div class="when muted">#{{ r.id }} · {{ r.received_at }}</div>
+  </div>
+  <div class="kv">
+    <div class="k">host</div><div>{{ r.hostname }}</div>
+    <div class="k">user</div><div>{{ r.username }}</div>
+    <div class="k">python</div><div>{{ r.python_version }}</div>
+    <div class="k">platform</div><div>{{ r.platform }}</div>
+    <div class="k">cwd</div><div><code>{{ r.cwd }}</code></div>
+    <div class="k">from</div><div>{{ r.remote_addr }} · <span class="muted">{{ r.user_agent }}</span></div>
+  </div>
+  {% if r.installed_sample %}
+  <div style="margin-top:10px">
+    <div class="muted" style="font-size:13px;margin-bottom:4px">installed packages leaked ({{ r.installed_sample|length }} names):</div>
+    {% for p in r.installed_sample %}<span class="pill">{{ p }}</span>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

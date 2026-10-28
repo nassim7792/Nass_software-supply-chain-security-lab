@@ -1,0 +1,38 @@
+# =============================================================================
+# TARGET APPLICATION — intentionally VULNERABLE to dependency confusion.
+#
+# The vulnerability is in the index configuration below, not in the app code.
+# This app depends on `internal-auth-utils`, which the developer believes comes
+# only from their trusted private index. But the resolver is also allowed to
+# look at a second index AND to pick the highest version it finds anywhere
+# (`index-strategy = "unsafe-best-match"`). That combination is exactly the
+# misconfiguration that enables dependency confusion.
+# =============================================================================
+[project]
+name = "target-app"
+version = "0.1.0"
+description = "Vulnerable FastAPI app used to demonstrate dependency confusion"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    # The developer MEANT the private internal library (e.g. 1.4.2).
+    # The resolver will happily install the 99.0.0 impostor instead.
+    "internal-auth-utils",
+]
+
+[tool.uv]
+# (1) The company's private index, added as the primary.
+index-url = "http://127.0.0.1:8080/simple/"
+# (2) PyPI left enabled as a fallback — convenient, but it widens the trust
+#     boundary to every name on the public registry.
+extra-index-url = ["https://pypi.org/simple/"]
+# (3) The dangerous bit: consider ALL indexes and pick the best (highest)
+#     version, instead of stopping at the first index that has the name.
+#     uv's DEFAULT is the safer "first-index"; this opts into the risky mode
+#     that mirrors classic pip behavior.
+index-strategy = "unsafe-best-match"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

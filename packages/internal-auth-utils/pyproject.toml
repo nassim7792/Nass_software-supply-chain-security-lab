@@ -1,0 +1,6 @@
+# Build config for the demonstration package. Uses the legacy setuptools
+# backend so that setup.py (and its post-install / build hooks) run — this is
+# how real dependency-confusion packages execute code at install time.
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
