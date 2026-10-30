@@ -1,0 +1,62 @@
+name: security-pipeline
+
+# Mirrors .gitlab-ci.yml for GitHub. On this LAB repository the target-app is
+# intentionally vulnerable, so the security gate is EXPECTED to block delivery.
+# The pipeline is green when the gate correctly blocks it (that is the demo),
+# and when all tests pass. In a real downstream project you would instead let a
+# red gate fail the pipeline and stop the deploy.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: pytest -q
+
+  security:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Generate SBOM (CycloneDX, transitive)
+        run: python -m security.sbom --real
+
+      - name: CVE scan (OSV)
+        run: python -m security.cve_scan || true
+
+      - name: Dependency-confusion policy scan
+        run: python -m defenses.policy_scanner target-app/pyproject.toml || true
+
+      - name: Security gate must block the intentionally-vulnerable app
+        run: |
+          if python -m security.gate --sbom security/sbom.cyclonedx.json \
+                                     --cve security/cve_report.json; then
+            echo "::error::Gate did NOT block an intentionally-vulnerable app"
+            exit 1
+          else
+            echo "Gate correctly blocked delivery (lab demonstration)."
+          fi
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            security/sbom.cyclonedx.json
+            security/cve_report.json

@@ -1,76 +1,93 @@
 # Architecture
 
-The lab has two planes — an **offensive** plane that stages a dependency
-confusion attack in isolation, and a **defensive / DevSecOps** plane that
-detects it, prevents it, and enforces security as a gate on delivery.
+Le laboratoire s'organise en deux plans complémentaires : un plan **offensif**,
+qui met en scène l'attaque par confusion de dépendances en vase clos, et un plan
+**défensif / DevSecOps**, qui la détecte, la prévient et l'arrête au niveau de la
+livraison.
 
-## System overview
+## Vue système
 
 ```mermaid
 flowchart TB
-    subgraph OFFENSE["🔴 Offensive plane (isolated, localhost only)"]
+    subgraph OFF["Plan offensif (isolé, localhost uniquement)"]
         direction TB
-        REG["Local private index<br/>pypiserver :8080"]
-        IMP["Impostor package<br/>internal-auth-utils 99.0.0<br/>(post-install + import hooks)"]
-        APP["Target FastAPI app<br/>unsafe index config"]
-        MON["Monitoring dashboard<br/>:8888 + SQLite + timeline"]
-        IMP -->|published to| REG
-        APP -->|uv sync picks highest version| REG
-        REG -->|installs impostor| APP
-        APP -->|hooks fire: benign beacons| MON
+        REG["Registre privé local<br/>pypiserver : 8080"]
+        IMP["Paquet imposteur<br/>internal-auth-utils 99.0.0<br/>(hooks build / post-install / import)"]
+        APP["Application cible FastAPI<br/>configuration d'index non sûre"]
+        MON["Supervision<br/>:8888 + SQLite + timeline"]
+        IMP -->|publié sur| REG
+        APP -->|résolution : version la plus élevée| REG
+        REG -->|installe l'imposteur| APP
+        APP -->|les hooks émettent des balises inoffensives| MON
     end
 
-    subgraph DEFENSE["🔵 Defensive plane"]
+    subgraph DEF["Plan défensif"]
         direction TB
-        DET["Detection<br/>hash · network · filesystem"]
-        DEF["Defenses<br/>lockfile · namespace · scoped index<br/>signing · policy-as-code"]
+        DET["Détection<br/>intégrité, réseau, fichiers"]
+        DEFS["Défenses<br/>lockfile, espace de noms, index scopé,<br/>signature, policy-as-code"]
     end
 
-    subgraph DEVSECOPS["⚙️ DevSecOps pipeline (GitLab CI/CD)"]
+    subgraph OPS["Chaîne DevSecOps (CI/CD)"]
         direction LR
         B["build"] --> T["test<br/>pytest"] --> S["sbom<br/>CycloneDX"]
         S --> C["scan<br/>OSV / Trivy"]
-        C --> P["policy<br/>dep-confusion"]
-        P --> G{"security gate<br/>policy.yml"}
+        C --> P["policy<br/>confusion de dép."]
+        P --> G{"porte de sécurité<br/>security-policy.yml"}
         G -->|PASS| D["deploy"]
-        G -->|FAIL| X["⛔ delivery blocked"]
+        G -->|FAIL| X["livraison bloquée"]
     end
 
-    APP -.audited by.-> DET
-    APP -.hardened by.-> DEF
-    APP -.inventoried by.-> S
-    DEF -.policy reused by.-> P
-    DET -.evidence for.-> G
+    APP -.auditée par.-> DET
+    APP -.durcie par.-> DEFS
+    APP -.inventoriée par.-> S
+    DEFS -.politique réutilisée par.-> P
+    DET -.preuves pour.-> G
 ```
 
-## Data flow through the pipeline
+## Flux de données dans le pipeline
 
 ```mermaid
 flowchart LR
-    SRC["repo<br/>pyproject.toml<br/>requirements.txt"] --> SBOM["sbom.cyclonedx.json"]
-    SBOM --> SCAN["cve_report.json<br/>(OSV lookups)"]
+    SRC["dépôt<br/>pyproject.toml<br/>requirements.txt"] --> SBOM["sbom.cyclonedx.json"]
+    SBOM --> SCAN["cve_report.json<br/>(interrogations OSV)"]
     POLICY["security-policy.yml"] --> GATE{"gate.py"}
     SBOM --> GATE
     SCAN --> GATE
-    SRC --> PSCAN["policy_scanner<br/>(internal names)"] --> GATE
-    GATE -->|exit 0| SHIP["deploy ✅"]
-    GATE -->|exit 1| STOP["blocked ⛔"]
+    SRC --> PSCAN["policy_scanner<br/>(noms internes)"] --> GATE
+    GATE -->|code 0| SHIP["déploiement"]
+    GATE -->|code 1| STOP["livraison bloquée"]
 ```
 
-## Components
+## À quelle étape chaque défense agit
 
-| Layer | Path | Responsibility |
+L'attaque progresse de gauche à droite, de la publication à l'exécution. Plus une
+défense agit tôt, meilleure est la garantie, puisque l'imposteur n'est même pas
+sélectionné.
+
+```mermaid
+flowchart LR
+    S1["publication"] --> S2["résolution"] --> S3["téléchargement"] --> S4["build / install"] --> S5["exécution / import"]
+
+    NR["Réservation d'espace de noms"] -.bloque.-> S1
+    SC["Registre scopé"] -.bloque.-> S2
+    PS["Policy-as-code"] -.bloque.-> S2
+    LP["Lockfile + empreintes"] -.bloque.-> S4
+    SG["Vérification de signature"] -.bloque.-> S4
+```
+
+## Composants
+
+| Couche | Chemin | Responsabilité |
 |---|---|---|
-| Registry | `scripts/`, runner | Local private index (pypiserver) |
-| Impostor | `packages/internal-auth-utils/` | Demonstrates the attack mechanism (benign) |
-| Target | `target-app/` | Intentionally vulnerable consumer app |
-| Monitor | `monitoring/` | Captures + visualises the "exfil" beacons |
-| Detection | `detection/` | Hash, network, filesystem detectors |
-| Defenses | `defenses/` | Five preventive controls + policy scanner |
-| SBOM | `security/sbom.py` | CycloneDX inventory |
-| CVE scan | `security/cve_scan.py` | OSV / Trivy vulnerability lookup |
-| Gate | `security/gate.py`, `security-policy.yml` | Configurable delivery gate |
-| CI/CD | `.gitlab-ci.yml` | Enforces the chain, blocks deploy on failure |
-| Orchestrator | `scsim/runner.py` | One-command narrated demo |
-| Tests | `tests/` | Offline pytest suite |
-```
+| Registre | `scsim/runner.py` | Index privé local (pypiserver) |
+| Imposteur | `packages/internal-auth-utils/` | Démontre le mécanisme d'attaque (inoffensif) |
+| Cible | `target-app/` | Application consommatrice volontairement vulnérable |
+| Supervision | `monitoring/` | Capture et visualise les balises, console de sécurité |
+| Détection | `detection/` | Détecteurs intégrité, réseau, système de fichiers |
+| Défenses | `defenses/` | Cinq contrôles préventifs et scanner de politique |
+| SBOM | `security/sbom.py` | Inventaire CycloneDX |
+| Scan CVE | `security/cve_scan.py` | Corrélation OSV / Trivy |
+| Porte | `security/gate.py`, `security/security-policy.yml` | Porte de livraison configurable |
+| CI/CD | `.gitlab-ci.yml`, `.github/workflows/ci.yml` | Enchaîne la chaîne et bloque le déploiement en cas d'échec |
+| Orchestrateur | `scsim/runner.py` | Démonstration narrée en une commande |
+| Tests | `tests/` | Suite pytest hors ligne |
